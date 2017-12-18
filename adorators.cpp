@@ -7,6 +7,8 @@
 #include <map>
 #include <tuple>
 #include <sstream>
+#include <thread>
+#include <mutex>
 
 typedef std::pair<int, int> edge_t;
 
@@ -27,6 +29,7 @@ struct edge_compare
 std::vector<std::priority_queue<edge_t, std::vector<edge_t >, edge_compare> > S;
 std::vector<std::set<int> > T;
 std::vector<std::vector<edge_t > > v;
+std::vector<std::mutex> mut;
 
 edge_t last(int b_method, int x) 
 {
@@ -49,6 +52,7 @@ void new_verticle(int num, int in_num)
 	v.push_back(std::vector<edge_t >());
 	S.push_back(std::priority_queue<edge_t, std::vector<edge_t >, edge_compare>());
 	T.push_back(std::set<int>());
+	mut.push_back(std::mutex());
 }
 
 edge_t find_edge(int b_method, int u)
@@ -60,21 +64,42 @@ edge_t find_edge(int b_method, int u)
 	return x;
 }
 
-int make_suitor(int b_method, int u, edge_t edge)
+int suitor(const std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, std::vector<int>& db, int b_method)
 {
-	edge_t y = last(b_method, edge.first);
-	insert(b_method, edge.first, std::make_pair(u, edge.second));
-	T[u].insert(edge.first);
-
-	//std::cout << "Inserting: " << u << " -> " << edge.first << " value: " << edge.second << " Removing: " << edge.first << " -> " << y.first << " value: " << y.second << std::endl;
-
-	if(y != NULLEDGE)
+	int i;
+	int res = 0; 
+	db.clear();
+	//TODO: optimize this loop
+	for(size_t i = 0; i < b.size(); ++i) db.push_back(0);
+	for(auto it = Q.begin(); it != Q.end(); ++it)
 	{
-		T[y.first].erase(edge.first);
-		edge_t z = find_edge(b_method, y.first);
-		if(z != NULLEDGE) return make_suitor(b_method, y.first, z) + edge.second - y.second;
+		i = 1;
+		while(i < b[*it])
+		{
+			edge_t p = find_edge(b_method, *it);
+			if(p != NULLEDGE)
+			{
+				std::lock_guard<std::mutex> lock(mut[p.first]);
+				if(find_edge(b_method, *it) == p)
+				{
+					++i;
+					edge_t y = last(b_method, p.first);
+					insert(b_method, y.first, std::make_pair(*it, p.second));
+					T[*it].insert(p.first);
+					res += p.second;
+
+					if(y != NULLEDGE)
+					{
+						T[y.first].erase(p.first);
+						q.push_back(y.first);
+						++db[y.first];
+						res -= y.second;
+					}
+				}
+			}
+		}
 	}
-	return edge.second - (y.second < 0 ? 0 : y.second);
+	return res;
 }
 
 int main(int argc, char* argv[]) 
@@ -117,18 +142,8 @@ int main(int argc, char* argv[])
 	edge_t x;
    for (int b_method = 0; b_method < b_limit + 1; b_method++) 
 	{
-		for(int u = 0; u < n_verticles; ++u) 
-		{
-			for(unsigned int i = 0; i < bvalue(b_method, out_map[u]); ++i) 
-			{
-				x = find_edge(b_method, u);
-				if(x == NULLEDGE) break;
-				res += make_suitor(b_method, u, x);
-
-				//std::cout << " " << res << std::endl;
-			}
-		}
-		std::cout << res/2 << std::endl;
+		//TODO: Zarządzanie współbieżnymi zadaniami (funkcja suitor)
+		//TODO: dodanie locków w metodach manipulujących strukturami
 		res = 0;
 		for(int i = 0; i < n_verticles; ++i)
 		{
