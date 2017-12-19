@@ -9,6 +9,8 @@
 #include <sstream>
 #include <thread>
 #include <mutex>
+#include <future>
+#include <algorithm>
 
 typedef std::pair<int, int> edge_t;
 
@@ -30,9 +32,11 @@ std::vector<std::priority_queue<edge_t, std::vector<edge_t >, edge_compare> > S;
 std::vector<std::set<int> > T;
 std::vector<std::vector<edge_t > > v;
 std::vector<std::mutex> mut;
+std::mutex Smut, ochrona;
 
 edge_t last(int b_method, int x) 
 {
+	std::lock_guard<std::mutex> lock(Smut);
 	//std::cout << "S(" << x << ") size = " << S[x].size() << " b = " << bvalue(b_method, out_map[x]) << std::endl;
 	if(S[x].size() == bvalue(b_method, out_map[x])) return S[x].top();
 	return NULLEDGE;
@@ -40,6 +44,7 @@ edge_t last(int b_method, int x)
 
 void insert(int b_method, int u, edge_t edge)
 {
+	std::lock_guard<std::mutex> lock(Smut);
 	//std::cout << "S(" << u << ") size = " << S[u].size()  << " b = " << bvalue(b_method, out_map[u]) << std::endl;
 	if(S[u].size() == bvalue(b_method, out_map[u])) S[u].pop();
 	S[u].push(edge);
@@ -64,13 +69,10 @@ edge_t find_edge(int b_method, int u)
 	return x;
 }
 
-int suitor(const std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, std::vector<int>& db, int b_method)
+int suitor(const std::vector<int> Q, std::vector<int>& q, const std::vector<int>& b, std::vector<int>& db, int b_method)
 {
 	int i;
 	int res = 0; 
-	db.clear();
-	//TODO: optimize this loop
-	for(size_t i = 0; i < b.size(); ++i) db.push_back(0);
 	for(auto it = Q.begin(); it != Q.end(); ++it)
 	{
 		i = 1;
@@ -90,6 +92,7 @@ int suitor(const std::vector<int>& Q, std::vector<int>& q, const std::vector<int
 
 					if(y != NULLEDGE)
 					{
+						std::lock_guard<std::mutex> lockk(ochrona);
 						T[y.first].erase(p.first);
 						q.push_back(y.first);
 						++db[y.first];
@@ -97,6 +100,7 @@ int suitor(const std::vector<int>& Q, std::vector<int>& q, const std::vector<int
 					}
 				}
 			}
+			else break;
 		}
 	}
 	return res;
@@ -111,17 +115,18 @@ int main(int argc, char* argv[])
    }
 
    int thread_count = std::stoi(argv[1]);
+	--thread_count;
    int b_limit = std::stoi(argv[3]);
    std::string input_filename{argv[2]};
 	std::ifstream infile;
 	infile.open(input_filename);
 	int n_verticles = 0;
-	int a,b,w;
 	int res = 0;
 	std::string line;
 	std::istringstream iss; 
 	while(std::getline(infile, line)) 
 	{
+		int a,b,w;
 		if(line[0] != '#')
 		{ 
 			iss = std::istringstream(line);
@@ -139,11 +144,45 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-	edge_t x;
    for (int b_method = 0; b_method < b_limit + 1; b_method++) 
 	{
-		//TODO: Zarządzanie współbieżnymi zadaniami (funkcja suitor)
-		//TODO: dodanie locków w metodach manipulujących strukturami
+		std::vector<int> b,nb;
+		std::vector<int> Q,q;
+		std::vector<std::future<int> > futures;
+		for(int i = 0; i < n_verticles; ++i) 
+		{
+			b.push_back(bvalue(b_method, out_map[i]));
+			nb.push_back(0);
+			Q.push_back(i);
+		}
+		while(!Q.empty())
+		{
+			for(int i = 0; i < thread_count; ++i)
+			{
+				std::vector<int> pq{};
+				if(i == thread_count - 1) pq = Q;
+				else 
+					for(size_t j = 0; j < Q.size() / thread_count; ++j)
+					{
+						pq.push_back(Q.back());
+						Q.pop_back();
+					}
+				futures.push_back(std::async([&pq, &q, &b, &nb, b_method]
+					{
+						return suitor(pq, q, b, nb, b_method);
+					}));
+			}
+			for(auto it = futures.begin(); it != futures.end(); ++it) res += it->get();
+			std::sort(q.begin(), q.end());
+			Q.clear();
+			Q.push_back(q.front());
+			for(size_t i = 1; i < q.size(); ++i)
+				if(q[i] != q[i - 1]) Q.push_back(q[i]);
+			q.clear();
+			b = nb;
+			for(int i = 0; i < n_verticles; ++i) nb[i] = 0;
+		}
+		std::cout << res/2 << std::endl;
 		res = 0;
 		for(int i = 0; i < n_verticles; ++i)
 		{
