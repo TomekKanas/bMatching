@@ -1,4 +1,4 @@
-#include "blimit.hpp"
+#include "limits/blimit.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -11,6 +11,7 @@
 #include <mutex>
 #include <future>
 #include <algorithm>
+#include <cassert>
 
 typedef std::pair<int, int> edge_t;
 
@@ -31,13 +32,13 @@ struct edge_compare
 std::vector<std::priority_queue<edge_t, std::vector<edge_t >, edge_compare> > S;
 std::vector<std::set<int> > T;
 std::vector<std::vector<edge_t > > v;
-std::vector<std::mutex> mut;
+std::vector<std::unique_ptr<std::mutex> > mut;
 std::mutex Smut, ochrona;
 
 edge_t last(int b_method, int x) 
 {
 	std::lock_guard<std::mutex> lock(Smut);
-	//std::cout << "S(" << x << ") size = " << S[x].size() << " b = " << bvalue(b_method, out_map[x]) << std::endl;
+	//std::cout << "Last: S(" << x << ") size = " << S[x].size() << " b = " << bvalue(b_method, out_map[x]) << std::endl;
 	if(S[x].size() == bvalue(b_method, out_map[x])) return S[x].top();
 	return NULLEDGE;
 }
@@ -45,9 +46,9 @@ edge_t last(int b_method, int x)
 void insert(int b_method, int u, edge_t edge)
 {
 	std::lock_guard<std::mutex> lock(Smut);
-	//std::cout << "S(" << u << ") size = " << S[u].size()  << " b = " << bvalue(b_method, out_map[u]) << std::endl;
 	if(S[u].size() == bvalue(b_method, out_map[u])) S[u].pop();
 	S[u].push(edge);
+	//std::cout << "Insert: S(" << u << ") size = " << S[u].size()  << " b = " << bvalue(b_method, out_map[u]) << std::endl;
 }
 
 void new_verticle(int num, int in_num) 
@@ -57,7 +58,7 @@ void new_verticle(int num, int in_num)
 	v.push_back(std::vector<edge_t >());
 	S.push_back(std::priority_queue<edge_t, std::vector<edge_t >, edge_compare>());
 	T.push_back(std::set<int>());
-	mut.push_back(std::mutex());
+	mut.push_back(std::make_unique<std::mutex>());
 }
 
 edge_t find_edge(int b_method, int u)
@@ -65,33 +66,49 @@ edge_t find_edge(int b_method, int u)
 	edge_compare cmp;
 	edge_t x = NULLEDGE; 
 	for(auto it = v[u].begin(); it != v[u].end(); ++it)
-		if(cmp(*it, x) && cmp(*it, last(b_method, it->first)) && T[u].count(it->first) == 0) x = *it;
+		if(cmp(*it, x) && cmp(edge_t(u, it->second), last(b_method, it->first)) && T[u].count(it->first) == 0) x = *it;
 	return x;
 }
 
+
 int suitor(const std::vector<int> Q, std::vector<int>& q, const std::vector<int>& b, std::vector<int>& db, int b_method)
 {
+	//std::cout << "Suitor function entered by thread: " << std::this_thread::get_id() << std::endl;
 	int i;
 	int res = 0; 
+	
+	
+	std::set<int> testing_set{1290, 1292};//, 2602, 2613, 6410, 6426};
+
+	
 	for(auto it = Q.begin(); it != Q.end(); ++it)
 	{
-		i = 1;
+		i = 0;
 		while(i < b[*it])
 		{
 			edge_t p = find_edge(b_method, *it);
 			if(p != NULLEDGE)
 			{
-				std::lock_guard<std::mutex> lock(mut[p.first]);
+				std::lock_guard<std::mutex> lock(*mut[p.first]);
 				if(find_edge(b_method, *it) == p)
 				{
+					//if(testing_set.count(*it) > 0 || testing_set.count(p.first) > 0) std::cout << "Found edge: " << *it << " -> " << p.first << " value: " << p.second << std::endl;
 					++i;
 					edge_t y = last(b_method, p.first);
-					insert(b_method, y.first, std::make_pair(*it, p.second));
+					insert(b_method, p.first, std::make_pair(*it, p.second));
+					ochrona.lock();
 					T[*it].insert(p.first);
+					ochrona.unlock();
 					res += p.second;
 
 					if(y != NULLEDGE)
 					{
+						/*if(testing_set.count(*it) > 0 || testing_set.count(p.first) || testing_set.count(y.first) > 0) 
+						{
+							std::cout << "Removing edge: " << y.first << " -> " << p.first << " value: " << y.second << std::endl;
+							std::cout << "Because of adding edge: " << *it << " -> " << p.first << " value: " << p.second << std::endl;
+						}*/
+						assert(y.second <= p.second);
 						std::lock_guard<std::mutex> lockk(ochrona);
 						T[y.first].erase(p.first);
 						q.push_back(y.first);
@@ -101,6 +118,8 @@ int suitor(const std::vector<int> Q, std::vector<int>& q, const std::vector<int>
 				}
 			}
 			else break;
+			assert(T[*it].size() <= bvalue(b_method, out_map[*it]));
+			assert(S[*it].size() <= bvalue(b_method, out_map[*it]));
 		}
 	}
 	return res;
@@ -115,7 +134,6 @@ int main(int argc, char* argv[])
    }
 
    int thread_count = std::stoi(argv[1]);
-	--thread_count;
    int b_limit = std::stoi(argv[3]);
    std::string input_filename{argv[2]};
 	std::ifstream infile;
@@ -157,17 +175,23 @@ int main(int argc, char* argv[])
 		}
 		while(!Q.empty())
 		{
+			futures.clear();
+
+			std::cout << " " << Q.size() << std::endl;
+			//for(int it = 0; it < 20; ++it) std::cout << Q[it] << " ";
+			//std::cout << std::endl << std::endl;
+
 			for(int i = 0; i < thread_count; ++i)
 			{
 				std::vector<int> pq{};
-				if(i == thread_count - 1) pq = Q;
+				if(i == thread_count - 1) res += suitor(Q, q, b, nb, b_method);
 				else 
 					for(size_t j = 0; j < Q.size() / thread_count; ++j)
 					{
 						pq.push_back(Q.back());
 						Q.pop_back();
 					}
-				futures.push_back(std::async([&pq, &q, &b, &nb, b_method]
+				futures.push_back(std::async([pq, &q, &b, &nb, b_method]
 					{
 						return suitor(pq, q, b, nb, b_method);
 					}));
@@ -175,7 +199,7 @@ int main(int argc, char* argv[])
 			for(auto it = futures.begin(); it != futures.end(); ++it) res += it->get();
 			std::sort(q.begin(), q.end());
 			Q.clear();
-			Q.push_back(q.front());
+			if(!q.empty()) Q.push_back(q.front());
 			for(size_t i = 1; i < q.size(); ++i)
 				if(q[i] != q[i - 1]) Q.push_back(q[i]);
 			q.clear();
