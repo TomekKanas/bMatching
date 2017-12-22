@@ -56,7 +56,7 @@ edge_t find_edge(int b_method, int u)
 	edge_compare cmp;
 	edge_t x = NULLEDGE; 
 	for(auto it = v[u].begin(); it != v[u].end(); ++it)
-		if(cmp(*it, x) && cmp(*it, last(b_method, it->first)) && T[u].count(it->first) == 0) x = *it;
+		if(cmp(*it, x) && cmp(edge_t(u, it->second), last(b_method, it->first)) && T[u].count(it->first) == 0) x = *it;
 	return x;
 }
 
