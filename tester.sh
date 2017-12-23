@@ -1,6 +1,7 @@
 #!/bin/bash
 
-THREADS=(1 2 3 4 5 6 7 8)
+#THREADS=(1 2 3 4 5 6 7 8)
+THREADS=(1)
 
 if [ $# != 3 ] 
 then
