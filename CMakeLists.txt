@@ -16,7 +16,7 @@ macro (add_executable _name)
     endif()
 endmacro()
 
-add_executable(brut brut.cpp limits/blimit.cpp)
-add_executable(adorators adorators.cpp limits/blimit.cpp)
+add_executable(brut brut.cpp blimit.cpp)
+add_executable(adorators adorators.cpp blimit.cpp)
 
 install(TARGETS DESTINATION .)

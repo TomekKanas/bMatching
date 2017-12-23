@@ -1,4 +1,4 @@
-#include "limits/blimit.hpp"
+#include "blimit.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -7,10 +7,12 @@
 #include <map>
 #include <tuple>
 #include <sstream>
+#include <cassert>
 
 typedef std::pair<int, int> edge_t;
 
 const edge_t NULLEDGE = edge_t(-1, -1);
+const edge_t INFEDGE = edge_t(1e9 + 9, 1e9 + 9);
 
 std::map<int, int> in_map;
 std::vector<int> out_map;
@@ -31,12 +33,14 @@ std::vector<std::vector<edge_t > > v;
 edge_t last(int b_method, int x) 
 {
 	//std::cout << "S(" << x << ") size = " << S[x].size() << " b = " << bvalue(b_method, out_map[x]) << std::endl;
+	if(bvalue(b_method, out_map[x]) == 0) return INFEDGE;
 	if(S[x].size() == bvalue(b_method, out_map[x])) return S[x].top();
 	return NULLEDGE;
 }
 
 void insert(int b_method, int u, edge_t edge)
 {
+	assert(bvalue(b_method, out_map[u]) > 0);
 	//std::cout << "S(" << u << ") size = " << S[u].size()  << " b = " << bvalue(b_method, out_map[u]) << std::endl;
 	if(S[u].size() == bvalue(b_method, out_map[u])) S[u].pop();
 	S[u].push(edge);
@@ -85,7 +89,6 @@ int main(int argc, char* argv[])
       return 1;
    }
 
-   int thread_count = std::stoi(argv[1]);
    int b_limit = std::stoi(argv[3]);
    std::string input_filename{argv[2]};
 	std::ifstream infile;

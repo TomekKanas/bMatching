@@ -1,4 +1,4 @@
-#include "limits/blimit.hpp"
+#include "blimit.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -16,6 +16,7 @@
 typedef std::pair<int, int> edge_t;
 
 const edge_t NULLEDGE = edge_t(-1, -1);
+const edge_t INFEDGE = edge_t(1e9 + 9, 1e9 + 9);
 
 std::map<int, int> in_map;
 std::vector<int> out_map;
@@ -35,22 +36,18 @@ std::vector<std::vector<edge_t > > v;
 std::vector<std::unique_ptr<std::mutex> > mut;
 std::mutex Smut, ochrona;
 
-
-	int n_verticles = 0;
-
-
 edge_t last(int b_method, int x) 
 {
-	assert(x < n_verticles);
 	std::lock_guard<std::mutex> lock(Smut);
-	//std::cout << "Last: S(" << x << ") size = " << S[x].size() << " b = " << bvalue(b_method, out_map[x]) << std::endl;
+	//	std::cout << "Last: S(" << x << ") size = " << S[x].size() << " b = " << bvalue(b_method, out_map[x]) << std::endl;
+	if(bvalue(b_method, out_map[x]) == 0) return INFEDGE;
 	if(S[x].size() == bvalue(b_method, out_map[x])) return S[x].top();
 	return NULLEDGE;
 }
 
 void insert(int b_method, int u, edge_t edge)
 {
-	assert(u < n_verticles);
+	assert(bvalue(b_method, out_map[u]) > 0);
 	std::lock_guard<std::mutex> lock(Smut);
 	if(S[u].size() == bvalue(b_method, out_map[u])) S[u].pop();
 	S[u].push(edge);
@@ -145,6 +142,7 @@ int main(int argc, char* argv[])
 	std::ifstream infile;
 	infile.open(input_filename);
 	int res = 0;
+	int n_verticles = 0;
 	std::string line;
 	std::istringstream iss; 
 	while(std::getline(infile, line)) 
@@ -167,6 +165,7 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
+
    for (int b_method = 0; b_method < b_limit + 1; b_method++) 
 	{
 		std::vector<int> b,nb;
@@ -180,13 +179,6 @@ int main(int argc, char* argv[])
 		}
 		while(!Q.empty())
 		{
-			try {
-			std::cout << " " << Q.size() << std::endl;
-			//for(int it = 0; it < 20; ++it) std::cout << Q[it] << " ";
-			//std::cout << std::endl << std::endl;
-		
-
-
 			futures.clear();
 			int n = Q.size();
 			for(int i = 0; i < thread_count; ++i)
@@ -194,7 +186,7 @@ int main(int argc, char* argv[])
 				std::vector<int> pq{};
 				if(i == thread_count - 1) res += suitor(Q, q, b, nb, b_method);
 				else 
-					for(size_t j = 0; j < n / thread_count; ++j)
+					for(int j = 0; j < n / thread_count; ++j)
 					{
 						pq.push_back(Q.back());
 						Q.pop_back();
@@ -213,12 +205,6 @@ int main(int argc, char* argv[])
 			q.clear();
 			b = nb;
 			for(int i = 0; i < n_verticles; ++i) nb[i] = 0;
-
-
-			} catch( std::future_error& e) {
-				std::cout << "Future error thrown, message: " << e.what() << std::endl;
-				throw e;
-			}
 		}
 		std::cout << res/2 << std::endl;
 		res = 0;
