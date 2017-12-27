@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#THREADS=(1 2 3 4 5 6 7 8)
-THREADS=(1)
+THREADS=(1 2 3 4 6)
+#THREADS=(1)
 
 if [ $# != 3 ] 
 then
@@ -40,6 +40,7 @@ do
 		fi
 	fi
 	out="$out$(echo "$d2 - $d1" | bc) "
+	echo "Progress: $i/${#THREADS[@]}";
 done
 
 #rm result1.out

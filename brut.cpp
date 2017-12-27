@@ -132,6 +132,17 @@ int main(int argc, char* argv[])
 			}
 		}
 		std::cout << res/2 << std::endl;
+		
+		
+		for(int i = 0; i < n_verticles; ++i)
+		{
+			std::cout << out_map[i] << std::endl;
+			while(!S[i].empty())
+			{
+				std::cout << out_map[S[i].top().first] << " " << S[i].top().second << std::endl;
+				S[i].pop();
+			}
+		}
 		res = 0;
 		for(int i = 0; i < n_verticles; ++i)
 		{

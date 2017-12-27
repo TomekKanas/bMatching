@@ -18,7 +18,7 @@ typedef std::pair<int, int> edge_t;
 
 const edge_t NULLEDGE = edge_t(-1, -1);
 const edge_t INFEDGE = edge_t(1e9 + 9, 1e9 + 9);
-const int NUM_COPY = 5;
+const int NUM_COPY = 10;
 const int BREAK_MAIN = 0;
 
 std::map<int, int> in_map;
@@ -39,7 +39,8 @@ std::vector<std::vector<edge_t > > v;
 std::vector<std::unique_ptr<std::mutex> > mut;
 std::mutex Smut, Qmut, Tmut, ochrona;
 std::condition_variable empty_queue, finish;
-int working = 0;
+std::atomic_int working{0};
+bool end = false;
 
 
 
@@ -56,7 +57,6 @@ void new_verticle(int num, int in_num)
 edge_t last(int b_method, int x) 
 {
 	std::lock_guard<std::mutex> lock(Smut);
-	//	std::cout << "Last: S(" << x << ") size = " << S[x].size() << " b = " << bvalue(b_method, out_map[x]) << std::endl;
 	if(bvalue(b_method, out_map[x]) == 0) return INFEDGE;
 	if(S[x].size() == bvalue(b_method, out_map[x])) return S[x].top();
 	return NULLEDGE;
@@ -68,7 +68,6 @@ void insert(int b_method, int u, edge_t edge)
 	std::lock_guard<std::mutex> lock(Smut);
 	if(S[u].size() == bvalue(b_method, out_map[u])) S[u].pop();
 	S[u].push(edge);
-	//std::cout << "Insert: S(" << u << ") size = " << S[u].size()  << " b = " << bvalue(b_method, out_map[u]) << std::endl;
 }
 
 edge_t find_edge(int b_method, int u, std::set<int>& tempT)
@@ -80,6 +79,11 @@ edge_t find_edge(int b_method, int u, std::set<int>& tempT)
 	return x;
 }
 
+
+//	std::mutex output;
+
+
+
 int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, std::vector<int>& db, int b_method)
 {
 	std::set<int> tempT{};
@@ -87,7 +91,13 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 	std::vector<std::pair<int, int>> todelete{};
 	int i;
 	int res = 0; 
+
+	//output.lock();	
+	//std::cout << "Thread: " << std::this_thread::get_id() << std::endl;
+	//for(auto it = Q.begin(); it != Q.end(); ++it) std::cout << *it << " "; std::cout << std::endl;
+	//output.unlock();
 	
+
 	for(auto it = Q.begin(); it != Q.end(); ++it)
 	{
 		//TODO: wypróbować bez tego
@@ -101,6 +111,10 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 			edge_t p = find_edge(b_method, *it, tempT);
 			if(p != NULLEDGE)
 			{
+				//output.lock();
+				//std::cout << "Adding: " << *it << " -> " <<  p.first << " value: " << p.second << std::endl;
+				//output.unlock();
+
 				std::lock_guard<std::mutex> lock(*mut[p.first]); 
 				if(find_edge(b_method, *it, tempT) == p)
 				{
@@ -113,11 +127,12 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 
 					if(y != NULLEDGE)
 					{
+						//output.lock();
+						//std::cout << "Removing: " << y.first << " -> " << p.first << " value: " << y.second << std::endl;
+						//output.unlock();
+
 						assert(y.second <= p.second);
-						//T[y.first].erase(p.first);
 						todelete.push_back(std::make_pair(y.first, p.first));
-						//q.push_back(y.first);
-						//++db[y.first];
 						res -= y.second;
 					}
 				}
@@ -137,6 +152,11 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 	}
 	Tmut.unlock();	
 	ochrona.unlock();
+
+	//output.lock();
+	//std::cout << "Returning: " << res << std::endl;
+	//output.unlock();
+
 	return res;
 }
 
@@ -176,49 +196,60 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-
-	for (int b_method = 0; b_method < b_limit + 1; b_method++) 
-	{
-		std::vector<std::thread> threads;
-		std::vector<int> b,nb;
-		std::vector<int> Q,q;
-		int res = 0;
+	
+	std::atomic_int res;
+	int b_method = 0;
+	std::vector<std::thread> threads;
+	std::vector<int> b,nb;
+	std::vector<int> Q,q;
 		
+	for(int i = 1; i < thread_count; ++i)
+		threads.push_back(std::thread([&res, &Q, &q, &b, &nb, &b_method]
+		{
+			std::vector<int> toprocess{};
+			while(!end)
+			{
+				toprocess.clear();
+				std::unique_lock<std::mutex> lk(Qmut);
+				empty_queue.wait(lk, [&Q]{return !Q.empty() || end;});
+				if(end) break;
+				++working;
+				for(int i = 0; i < NUM_COPY; ++i)
+				{
+					toprocess.push_back(Q.back());
+					Q.pop_back();
+					if(Q.empty()) break;
+				}
+				lk.unlock();
+				res += suitor(toprocess, q, b, nb, b_method);
+				--working;
+				finish.notify_all();
+			}
+		}));
+
+
+	for (b_method = 0; b_method < b_limit + 1; ++b_method) 
+	{
+		res = 0;
+		b.clear();
+		nb.clear();
+		Qmut.lock();
+		Q.clear();
 		for(int i = 0; i < n_verticles; ++i) 
 		{
 			b.push_back(bvalue(b_method, out_map[i]));
 			nb.push_back(0);
 			Q.push_back(i);
 		}
-
-		for(int i = 1; i < thread_count; ++i)
-			threads.push_back(std::thread([&res, &Q, &q, &b, &nb, b_method]
-			{
-				std::vector<int> toprocess{};
-				while(true)
-				{
-					std::unique_lock<std::mutex> lk(Qmut);
-					empty_queue.wait(lk, [Q]{return !Q.empty();});
-					for(int i = 0; i < NUM_COPY; ++i)
-					{
-						toprocess.push_back(Q.back());
-						Q.pop_back();
-						if(Q.empty()) break;
-					}
-					lk.unlock();
-					++working;
-					res += suitor(toprocess, q, b, nb, b_method);
-					--working;
-				}
-			}));
-
+		Qmut.unlock();
 		while(!Q.empty())
 		{
-			std::cout << Q.size() << std::endl;
+			empty_queue.notify_all();
 			std::vector<int> toprocess{};
 			//TODO: nie jestem pewien czy to przyspieszy
-			while(!Q.empty())
+			while(true)
 			{
+				toprocess.clear();
 				std::unique_lock<std::mutex> lk(Qmut);
 				if(Q.empty()) break;
 				for(int i = 0; i < NUM_COPY; ++i)
@@ -245,12 +276,14 @@ int main(int argc, char* argv[])
 			q.clear();
 		}
 		std::cout << res/2 << std::endl;
-		res = 0;
 		for(int i = 0; i < n_verticles; ++i)
 		{
 			S[i] = std::priority_queue<edge_t, std::vector<edge_t >, edge_compare>();
 			T[i].clear();
 		}
    }
+	end = true;
+	empty_queue.notify_all();
+	for(auto it = threads.begin(); it != threads.end(); ++it) it->join();
 	return 0;
 }
