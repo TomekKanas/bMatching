@@ -33,23 +33,16 @@ struct edge_compare
 	}
 };
 
-bool lesser_edge(edge_t a, edge_t b)
-{
-	if(a.second == b.second) return out_map[a.first] < out_map[b.first];
-		return a.second < b.second;
-}
-
-
 std::vector<std::priority_queue<edge_t, std::vector<edge_t >, edge_compare> > S;
 std::vector<std::set<int> > T;
 std::vector<std::vector<edge_t > > v;
+std::vector<std::vector<edge_t >::iterator> vit;
 std::vector<std::unique_ptr<std::mutex> > mut;
 std::vector<std::unique_ptr<std::mutex> > Smut;
 std::mutex Qmut, ochrona;
 std::condition_variable empty_queue, finish;
 std::atomic_int working{0};
 bool end = false;
-
 
 
 void new_verticle(int num, int in_num) 
@@ -60,6 +53,7 @@ void new_verticle(int num, int in_num)
 	S.push_back(std::priority_queue<edge_t, std::vector<edge_t >, edge_compare>());
 	T.push_back(std::set<int>());
 	mut.push_back(std::make_unique<std::mutex>());
+	Smut.push_back(std::make_unique<std::mutex>());
 }
 
 edge_t last(int b_method, int x) 
@@ -79,13 +73,12 @@ void insert(int b_method, int u, edge_t edge)
 	S[u].push(edge);
 }
 
-edge_t find_edge(int b_method, int u, std::set<int>& tempT)
+edge_t find_edge(int b_method, int u)
 {
 	edge_compare cmp;
-	edge_t x = NULLEDGE; 
-	for(auto it = v[u].begin(); it != v[u].end(); ++it)
-		if(cmp(*it, x) && cmp(edge_t(u, it->second), last(b_method, it->first)) && tempT.count(it->first) == 0) x = *it;
-	return x;
+	for(vit[u]; vit[u] != v[u].end(); ++vit[u])
+		if(cmp(edge_t(u, vit[u]->second), last(b_method, vit[u]->first))) return *vit[u];
+	return NULLEDGE;
 }
 
 
@@ -103,13 +96,10 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 
 	for(auto it = Q.begin(); it != Q.end(); ++it)
 	{
-		//TODO: wypróbować bez tego
-		tempT = T[*it];
-
 		i = 0;
 		while(i < b[*it])
 		{
-			edge_t p = find_edge(b_method, *it, tempT);
+			edge_t p = find_edge(b_method, *it);
 			if(p != NULLEDGE)
 			{
 				//output.lock();
@@ -117,12 +107,12 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 				//output.unlock();
 
 				std::lock_guard<std::mutex> lock(*mut[p.first]); 
-				if(find_edge(b_method, *it, tempT) == p)
+				if(find_edge(b_method, *it) == p)
 				{
+					++vit[*it];
 					++i;
 					edge_t y = last(b_method, p.first);
 					insert(b_method, p.first, std::make_pair(*it, p.second));
-					tempT.insert(p.first);
 					inserted.push_back(std::make_pair(*it, p.first));
 					res += p.second;
 
@@ -146,7 +136,6 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 	for(auto it = inserted.begin(); it != inserted.end(); ++it) T[it->first].insert(it->second);
 	for(auto it = todelete.begin(); it != todelete.end(); ++it)
 	{
-		T[it->first].erase(it->second);
 		q.push_back(it->first);
 		++db[it->first];
 	}
@@ -197,7 +186,7 @@ int main(int argc, char* argv[])
 	}
 	//TODO: uwspółbieżnić
 	for(int i = 0; i < n_verticles; ++i)
-		sort(v[i].begin(), v[i].end(), lesser_edge);
+		sort(v[i].begin(), v[i].end(), edge_compare());
 
 	std::atomic_int res;
 	int b_method = 0;
@@ -237,6 +226,11 @@ int main(int argc, char* argv[])
 		nb.clear();
 		Qmut.lock();
 		Q.clear();
+	
+		vit.clear();
+		for(int i = 0; i < n_verticles; ++i)
+			vit.push_back(v[i].begin());
+
 		for(int i = 0; i < n_verticles; ++i) 
 		{
 			b.push_back(bvalue(b_method, out_map[i]));
