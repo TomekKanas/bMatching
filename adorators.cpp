@@ -33,11 +33,19 @@ struct edge_compare
 	}
 };
 
+bool lesser_edge(edge_t a, edge_t b)
+{
+	if(a.second == b.second) return out_map[a.first] < out_map[b.first];
+		return a.second < b.second;
+}
+
+
 std::vector<std::priority_queue<edge_t, std::vector<edge_t >, edge_compare> > S;
 std::vector<std::set<int> > T;
 std::vector<std::vector<edge_t > > v;
 std::vector<std::unique_ptr<std::mutex> > mut;
-std::mutex Smut, Qmut, Tmut, ochrona;
+std::vector<std::unique_ptr<std::mutex> > Smut;
+std::mutex Qmut, ochrona;
 std::condition_variable empty_queue, finish;
 std::atomic_int working{0};
 bool end = false;
@@ -56,8 +64,9 @@ void new_verticle(int num, int in_num)
 
 edge_t last(int b_method, int x) 
 {
-	std::lock_guard<std::mutex> lock(Smut);
 	if(bvalue(b_method, out_map[x]) == 0) return INFEDGE;
+	//TODO: Don't sure wether this is needed
+	std::lock_guard<std::mutex> lock(*Smut[x]);
 	if(S[x].size() == bvalue(b_method, out_map[x])) return S[x].top();
 	return NULLEDGE;
 }
@@ -65,7 +74,7 @@ edge_t last(int b_method, int x)
 void insert(int b_method, int u, edge_t edge)
 {
 	assert(bvalue(b_method, out_map[u]) > 0);
-	std::lock_guard<std::mutex> lock(Smut);
+	std::lock_guard<std::mutex> lock(*Smut[u]);
 	if(S[u].size() == bvalue(b_method, out_map[u])) S[u].pop();
 	S[u].push(edge);
 }
@@ -92,18 +101,10 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 	int i;
 	int res = 0; 
 
-	//output.lock();	
-	//std::cout << "Thread: " << std::this_thread::get_id() << std::endl;
-	//for(auto it = Q.begin(); it != Q.end(); ++it) std::cout << *it << " "; std::cout << std::endl;
-	//output.unlock();
-	
-
 	for(auto it = Q.begin(); it != Q.end(); ++it)
 	{
 		//TODO: wypróbować bez tego
-		Tmut.lock();
 		tempT = T[*it];
-		Tmut.unlock();
 
 		i = 0;
 		while(i < b[*it])
@@ -142,7 +143,6 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 	}
 	
 	ochrona.lock();
-	Tmut.lock();
 	for(auto it = inserted.begin(); it != inserted.end(); ++it) T[it->first].insert(it->second);
 	for(auto it = todelete.begin(); it != todelete.end(); ++it)
 	{
@@ -150,7 +150,6 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 		q.push_back(it->first);
 		++db[it->first];
 	}
-	Tmut.unlock();	
 	ochrona.unlock();
 
 	//output.lock();
@@ -196,7 +195,10 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-	
+	//TODO: uwspółbieżnić
+	for(int i = 0; i < n_verticles; ++i)
+		sort(v[i].begin(), v[i].end(), lesser_edge);
+
 	std::atomic_int res;
 	int b_method = 0;
 	std::vector<std::thread> threads;
