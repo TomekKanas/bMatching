@@ -60,6 +60,7 @@ void new_verticle(int num, int in_num)
 	S.push_back(std::priority_queue<edge_t, std::vector<edge_t >, edge_compare>());
 	T.push_back(std::set<int>());
 	mut.push_back(std::make_unique<std::mutex>());
+	Smut.push_back(std::make_unique<std::mutex>());
 }
 
 edge_t last(int b_method, int x) 
@@ -196,8 +197,8 @@ int main(int argc, char* argv[])
 		}
 	}
 	//TODO: uwspółbieżnić
-	for(int i = 0; i < n_verticles; ++i)
-		sort(v[i].begin(), v[i].end(), lesser_edge);
+	//for(int i = 0; i < n_verticles; ++i)
+//		sort(v[i].begin(), v[i].end(), lesser_edge);
 
 	std::atomic_int res;
 	int b_method = 0;
