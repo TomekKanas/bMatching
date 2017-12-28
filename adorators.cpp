@@ -19,7 +19,6 @@ typedef std::pair<int, int> edge_t;
 const edge_t NULLEDGE = edge_t(-1, -1);
 const edge_t INFEDGE = edge_t(1e9 + 9, 1e9 + 9);
 const int NUM_COPY = 10;
-const int BREAK_MAIN = 0;
 
 std::map<int, int> in_map;
 std::vector<int> out_map;
@@ -39,10 +38,10 @@ std::vector<std::vector<edge_t > > v;
 std::vector<std::vector<edge_t >::iterator> vit;
 std::vector<std::unique_ptr<std::mutex> > mut;
 std::vector<std::unique_ptr<std::mutex> > Smut;
-std::mutex Qmut, ochrona;
+std::mutex Qmut, ochrona, workmut;
 std::condition_variable empty_queue, finish;
-std::atomic_int working{0};
-bool end = false;
+int working{0};
+bool end = false, cleaning = false;;
 
 
 void new_verticle(int num, int in_num) 
@@ -67,7 +66,7 @@ edge_t last(int b_method, int x)
 
 void insert(int b_method, int u, edge_t edge)
 {
-	assert(bvalue(b_method, out_map[u]) > 0);
+	//assert(bvalue(b_method, out_map[u]) > 0);
 	std::lock_guard<std::mutex> lock(*Smut[u]);
 	if(S[u].size() == bvalue(b_method, out_map[u])) S[u].pop();
 	S[u].push(edge);
@@ -122,7 +121,7 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 						//std::cout << "Removing: " << y.first << " -> " << p.first << " value: " << y.second << std::endl;
 						//output.unlock();
 
-						assert(y.second <= p.second);
+						//assert(y.second <= p.second);
 						todelete.push_back(std::make_pair(y.first, p.first));
 						res -= y.second;
 					}
@@ -184,13 +183,22 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
+	std::vector<std::thread> threads;
+	int portion = n_verticles / thread_count;
 	//TODO: uwspółbieżnić
-	for(int i = 0; i < n_verticles; ++i)
+	for(int th = 0; th < thread_count - 1; ++th)
+		threads.push_back(std::thread([th, portion]
+		{
+			for(int i = th * portion; i < (th + 1) * portion; ++i)
+				sort(v[i].begin(), v[i].end(), edge_compare());
+		}));
+	for(int i = (thread_count - 1) * portion; i < n_verticles; ++i)
 		sort(v[i].begin(), v[i].end(), edge_compare());
+	for(auto it = threads.begin(); it != threads.end(); ++it) it->join();
+	threads.clear();
 
 	std::atomic_int res;
 	int b_method = 0;
-	std::vector<std::thread> threads;
 	std::vector<int> b,nb;
 	std::vector<int> Q,q;
 		
@@ -202,9 +210,11 @@ int main(int argc, char* argv[])
 			{
 				toprocess.clear();
 				std::unique_lock<std::mutex> lk(Qmut);
-				empty_queue.wait(lk, [&Q]{return !Q.empty() || end;});
+				empty_queue.wait(lk, [&Q]{return (!Q.empty() && !cleaning) || end;});
 				if(end) break;
+				workmut.lock();
 				++working;
+				workmut.unlock();
 				for(int i = 0; i < NUM_COPY; ++i)
 				{
 					toprocess.push_back(Q.back());
@@ -213,8 +223,10 @@ int main(int argc, char* argv[])
 				}
 				lk.unlock();
 				res += suitor(toprocess, q, b, nb, b_method);
+				workmut.lock();
 				--working;
-				finish.notify_all();
+				workmut.unlock();
+				if(working == 0) finish.notify_all();
 			}
 		}));
 
@@ -240,9 +252,9 @@ int main(int argc, char* argv[])
 		Qmut.unlock();
 		while(!Q.empty())
 		{
+			cleaning = false;
 			empty_queue.notify_all();
 			std::vector<int> toprocess{};
-			//TODO: nie jestem pewien czy to przyspieszy
 			while(true)
 			{
 				toprocess.clear();
@@ -257,9 +269,9 @@ int main(int argc, char* argv[])
 				lk.unlock();
 				res += suitor(toprocess, q, b, nb, b_method);
 			}
-			std::unique_lock<std::mutex> lock(ochrona);
+			std::unique_lock<std::mutex> lock(workmut);
 			finish.wait(lock, []{return working == 0;});
-			//TODO: Nie jestem pewien czy to działa
+			cleaning=true;
 			for(int i = 0; i < n_verticles; ++i)
 			{
 				b[i] = nb[i];
