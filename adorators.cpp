@@ -18,7 +18,8 @@ typedef std::pair<int, int> edge_t;
 
 const edge_t NULLEDGE = edge_t(-1, -1);
 const edge_t INFEDGE = edge_t(1e9 + 9, 1e9 + 9);
-const int NUM_COPY = 10;
+const int NUM_COPY = 70;
+const size_t NUM_TO_COMP = 10;
 
 std::map<int, int> in_map;
 std::vector<int> out_map;
@@ -42,6 +43,16 @@ std::mutex Qmut, ochrona, workmut;
 std::condition_variable empty_queue, finish;
 int working{0};
 bool end = false, cleaning = false;;
+
+bool verticle_cmp(int a, int b)
+{
+	int na = std::min(v[a].size(), NUM_TO_COMP);
+	int nb = std::min(v[b].size(), NUM_TO_COMP);
+	long long suma = 0, sumb = 0;
+	for(int i = 0; i < na; ++i) suma += v[a][i].second;
+	for(int i = 0; i < nb; ++i) sumb += v[b][i].second;
+	return suma > sumb;
+}
 
 
 void new_verticle(int num, int in_num) 
@@ -91,7 +102,8 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 	std::vector<std::pair<int, int>> inserted{};
 	std::vector<std::pair<int, int>> todelete{};
 	int i;
-	int res = 0; 
+	int res = 0;
+	std::sort(Q.begin(), Q.end(), verticle_cmp);
 
 	for(auto it = Q.begin(); it != Q.end(); ++it)
 	{
