@@ -19,7 +19,6 @@ typedef std::pair<int, int> edge_t;
 const edge_t NULLEDGE = edge_t(-1, -1);
 const edge_t INFEDGE = edge_t(1e9 + 9, 1e9 + 9);
 const int NUM_COPY = 10;
-const int BREAK_MAIN = 0;
 
 std::map<int, int> in_map;
 std::vector<int> out_map;
@@ -45,12 +44,12 @@ std::vector<std::set<int> > T;
 std::vector<std::vector<edge_t > > v;
 std::vector<std::unique_ptr<std::mutex> > mut;
 std::vector<std::unique_ptr<std::mutex> > Smut;
-std::mutex Qmut, ochrona;
+std::mutex Qmut, ochrona, workmut;
 std::condition_variable empty_queue, finish;
-std::atomic_int working{0};
-bool end = false;
+int working{0};
+bool end{false};
 
-
+bool cleaning = false;
 
 void new_verticle(int num, int in_num) 
 {
@@ -65,16 +64,21 @@ void new_verticle(int num, int in_num)
 
 edge_t last(int b_method, int x) 
 {
+	//assert(!cleaning);
+
+	std::lock_guard<std::mutex> lock(*Smut[x]);
 	if(bvalue(b_method, out_map[x]) == 0) return INFEDGE;
 	//TODO: Don't sure wether this is needed
-	std::lock_guard<std::mutex> lock(*Smut[x]);
-	if(S[x].size() == bvalue(b_method, out_map[x])) return S[x].top();
+	if(S[x].size() == bvalue(b_method, out_map[x])) 
+		return S[x].top();
 	return NULLEDGE;
 }
 
 void insert(int b_method, int u, edge_t edge)
 {
-	assert(bvalue(b_method, out_map[u]) > 0);
+	//assert(!cleaning);
+	//assert(bvalue(b_method, out_map[u]) > 0);
+
 	std::lock_guard<std::mutex> lock(*Smut[u]);
 	if(S[u].size() == bvalue(b_method, out_map[u])) S[u].pop();
 	S[u].push(edge);
@@ -93,7 +97,6 @@ edge_t find_edge(int b_method, int u, std::set<int>& tempT)
 //	std::mutex output;
 
 
-
 int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, std::vector<int>& db, int b_method)
 {
 	std::set<int> tempT{};
@@ -101,7 +104,6 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 	std::vector<std::pair<int, int>> todelete{};
 	int i;
 	int res = 0; 
-
 	for(auto it = Q.begin(); it != Q.end(); ++it)
 	{
 		//TODO: wypróbować bez tego
@@ -111,6 +113,7 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 		while(i < b[*it])
 		{
 			edge_t p = find_edge(b_method, *it, tempT);
+
 			if(p != NULLEDGE)
 			{
 				//output.lock();
@@ -133,7 +136,7 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 						//std::cout << "Removing: " << y.first << " -> " << p.first << " value: " << y.second << std::endl;
 						//output.unlock();
 
-						assert(y.second <= p.second);
+						//assert(y.second <= p.second);
 						todelete.push_back(std::make_pair(y.first, p.first));
 						res -= y.second;
 					}
@@ -160,6 +163,9 @@ int suitor(std::vector<int>& Q, std::vector<int>& q, const std::vector<int>& b, 
 	return res;
 }
 
+
+
+
 int main(int argc, char* argv[]) 
 {
    if (argc != 4) 
@@ -169,11 +175,11 @@ int main(int argc, char* argv[])
    }
 
    int thread_count = std::stoi(argv[1]);
+	int n_verticles = 0;
    int b_limit = std::stoi(argv[3]);
    std::string input_filename{argv[2]};
 	std::ifstream infile;
 	infile.open(input_filename);
-	int n_verticles = 0;
 	std::string line;
 	std::istringstream iss; 
 	while(std::getline(infile, line)) 
@@ -214,9 +220,11 @@ int main(int argc, char* argv[])
 			{
 				toprocess.clear();
 				std::unique_lock<std::mutex> lk(Qmut);
-				empty_queue.wait(lk, [&Q]{return !Q.empty() || end;});
+				empty_queue.wait(lk, [&Q]{return (!Q.empty() && !cleaning) || end;});
 				if(end) break;
+				workmut.lock();
 				++working;
+				workmut.unlock();
 				for(int i = 0; i < NUM_COPY; ++i)
 				{
 					toprocess.push_back(Q.back());
@@ -225,8 +233,10 @@ int main(int argc, char* argv[])
 				}
 				lk.unlock();
 				res += suitor(toprocess, q, b, nb, b_method);
+				workmut.lock();
 				--working;
-				finish.notify_all();
+				workmut.unlock();
+				if(working == 0) finish.notify_all();
 			}
 		}));
 
@@ -246,10 +256,11 @@ int main(int argc, char* argv[])
 		}
 		Qmut.unlock();
 		while(!Q.empty())
-		{
+		{	
+			//std::cerr << Q.size() << std::endl;
+			cleaning = false;		
 			empty_queue.notify_all();
 			std::vector<int> toprocess{};
-			//TODO: nie jestem pewien czy to przyspieszy
 			while(true)
 			{
 				toprocess.clear();
@@ -264,8 +275,9 @@ int main(int argc, char* argv[])
 				lk.unlock();
 				res += suitor(toprocess, q, b, nb, b_method);
 			}
-			std::unique_lock<std::mutex> lock(ochrona);
+			std::unique_lock<std::mutex> lock(workmut);
 			finish.wait(lock, []{return working == 0;});
+			cleaning = true;	
 			//TODO: Nie jestem pewien czy to działa
 			for(int i = 0; i < n_verticles; ++i)
 			{
@@ -285,6 +297,7 @@ int main(int argc, char* argv[])
 			T[i].clear();
 		}
    }
+
 	end = true;
 	empty_queue.notify_all();
 	for(auto it = threads.begin(); it != threads.end(); ++it) it->join();

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-THREADS=(1 2 3 4 6)
+THREADS=(1 2 3 4 6 8)
 #THREADS=(1)
 
 if [ $# != 3 ] 
@@ -22,13 +22,12 @@ do
 	if [ $i == ${THREADS[0]} ]
 	then
 		d1=$(date +%s.%N)
-		./$1 $i $2 $3 > result.out
+		./$1 $i $2 $3 1> result.out
 		d2=$(date +%s.%N)
 	else
 		d1=$(date +%s.%N)
-		./$1 $i $2 $3 > result1.out
+		./$1 $i $2 $3 1> result1.out
 		d2=$(date +%s.%N)
-		#echo "kupa" > result1.out
 		if ! cmp -s result.out result1.out
 		then
 			echo "Results differ with thread numbers: ${THREADS[0]} $i"
